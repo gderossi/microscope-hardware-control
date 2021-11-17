@@ -1,4 +1,4 @@
-const bool DEBUG_MODE = true; //Change this to true to see initialized parameters printed over serial for debugging
+const bool DEBUG_MODE = false; //Change this to true to see initialized parameters printed over serial for debugging
 
 //Pin setup
 //If using a different device than the Teensy 3.6, change pin numbers
@@ -11,6 +11,8 @@ const int CHOPPER_OUTPUT_REFERENCE_PIN = 30; //Digital input, 30 for Teensy
 const int SERIAL_INDICATOR_PIN = 13; //LED Pin, 13 for Teensy
 const int LASER_SHUTTER_1_PIN =  27; //Digital output, 27 for Teensy
 const int LASER_SHUTTER_2_PIN = 28; //Digital output, 28 for Teensy
+const int SINGLE_LASER_TRANSMITTER_PIN = 23; //Digital output, 23 for Teensy
+const int SINGLE_LASER_RECEIVER_PIN = 22; //Digital input, 22 for Teensy
 
 const int ODORANT_1_PIN = 0;
 const int ODORANT_2_PIN = 2;
@@ -29,6 +31,7 @@ const int VOLUME_GALVO_RESPONSE_TIME = 250; //Microseconds
 const int LASER_SHUTTER_RESPONSE_TIME = 5000; //Microseconds
 const int BAUDRATE = 115200;   //Ignored by Teensy
 const int DEFAULT_TIME_UNIT = 1000000; //Microseconds per second
+const int CHOPPER_ALIGNMENT_DELAY = 5000; //Microseconds to wait for chopper start/stop
 
 //Currently preallocating arrays for odorant and state orders, make this number bigger/smaller depending on what the use cases are
 const int MAX_STATE_COUNT = 32;
@@ -88,7 +91,7 @@ bool laserEnabled = false;
 
 //Delta timing variables
 unsigned long volumeGalvoDelta;
-unsigned long cameraDelta;
+unsigned long cameraDelta = -1;
 unsigned long stateDelta;
 
 unsigned long volumeGalvoStart;
@@ -128,6 +131,8 @@ void setup() {
   pinMode(SERIAL_INDICATOR_PIN, OUTPUT);
   pinMode(LASER_SHUTTER_1_PIN, OUTPUT);
   pinMode(LASER_SHUTTER_2_PIN, OUTPUT);
+  pinMode(SINGLE_LASER_TRANSMITTER_PIN, OUTPUT);
+  pinMode(SINGLE_LASER_RECEIVER_PIN, INPUT);
   pinMode(ODORANT_1_PIN, OUTPUT);
   pinMode(ODORANT_2_PIN, OUTPUT);
   pinMode(ODORANT_3_PIN, OUTPUT);
@@ -167,6 +172,11 @@ void setupLoop()
   String odorants;
   unsigned int stateCount;
   int o;
+
+  odorantIndex = 0;
+  stateIndex = 0;
+  currentState = NULL_STATE;
+  previousState = NULL_STATE;
   
   while(programState == SETUP)
   {
@@ -183,19 +193,16 @@ void setupLoop()
       {
         case SLICES_PER_VOLUME:
           slicesPerVolume = Serial.parseInt();
-          //Serial.find('\n');
           Serial.print("Set 'Slices per volume' to ");
           Serial.println(slicesPerVolume);
           break;
         case VOLUMES_PER_SECOND:
           volumesPerSecond = Serial.parseInt();
-          //Serial.find('\n');
           Serial.print("Set 'Volumes per second' to ");
           Serial.println(volumesPerSecond);
           break;
         case VOLUME_SCALE_MIN:
           volumeScaleMin = Serial.parseFloat();
-          //Serial.find('\n');
           Serial.print("Set 'Volume scale min' to ");
           Serial.println(volumeScaleMin);
           break;
@@ -326,13 +333,19 @@ void initializeParameters(bool debug)
   cameraExposureTime = volumeGalvoStepTime - VOLUME_GALVO_RESPONSE_TIME;
 
   volumeGalvoDelta = volumeGalvoStepTime;
-  cameraDelta = cameraExposureTime;
 
   currentState = stateOrder[stateIndex] & STATE_MASK;
   stateDelta = (stateOrder[stateIndex] & DURATION_MASK) * DEFAULT_TIME_UNIT;
 
-  analogWriteFrequency(CHOPPER_INPUT_REFERENCE_PIN, volumesPerSecond/2);
-  analogWrite(CHOPPER_INPUT_REFERENCE_PIN, 127);
+  if(laserMode == BOTH_LASERS)
+  {
+    analogWriteFrequency(CHOPPER_INPUT_REFERENCE_PIN, volumesPerSecond/2);
+    analogWrite(CHOPPER_INPUT_REFERENCE_PIN, 127);
+  }
+  else
+  {
+    singleLaserChopperAlignment();
+  }
   
   if(debug)
   {
@@ -376,6 +389,7 @@ void calibrationLoop()
     updateHardware();
     checkSerial(); 
   }
+  Serial.println("Calibration complete. Starting experiment...");
 }
 
 //Checks for and updates a subset of parameters as part of the calibration loop
@@ -384,7 +398,12 @@ void checkSerial()
   if(Serial.available())
   {
     char parameterSelector = Serial.read();
-
+    
+    if(parameterSelector == '\n' || parameterSelector == '\r')
+    {
+      return;
+    }
+    
     switch(parameterSelector)
     {
       case START:
@@ -413,6 +432,10 @@ void checkSerial()
       case ABORT_EXPERIMENT:
         programState = RESET;
         break;
+      default:
+        Serial.print("Error: parameter ");
+        Serial.print(parameterSelector);
+        Serial.println(" was not recognized");
     }
   }
 }
@@ -420,10 +443,17 @@ void checkSerial()
 //Runs the main loop and updates states and hardware
 void experimentLoop()
 {
+  //Clear incoming Serial buffer
+  while(Serial.available())
+  {
+    Serial.read();
+  }
+  
   initializeHardware();
   currentTime = micros();
   volumeGalvoStart = currentTime;
   cameraStart = currentTime;
+  cameraDelta = -1;
   stateStart = currentTime;
   
   while(programState == EXPERIMENT)
@@ -431,6 +461,10 @@ void experimentLoop()
     currentTime = micros();
     updateStates();
     updateHardware();
+    if(Serial.available())
+    {
+      programState = RESET;
+    }
   }
 }
 
@@ -439,18 +473,24 @@ void updateHardware()
   if(!newVolume || laserMode != BOTH_LASERS)
   {
     //Delta timing for camera
-    if(currentTime - cameraStart >= cameraDelta && cameraEnabled)
+    if(currentTime - cameraStart >= cameraDelta)
     {
       if(cameraOn)
       {
         cameraOn = false;
-        digitalWrite(CAMERA_TRIGGER_PIN, LOW);  //Stop camera exposure
+        if(cameraEnabled)
+        {
+          digitalWrite(CAMERA_TRIGGER_PIN, LOW);  //Stop camera exposure
+        }
         cameraDelta = -1;
       }
       else
       {
         cameraOn = true;
-        digitalWrite(CAMERA_TRIGGER_PIN, HIGH); //Start camera exposure
+        if(cameraEnabled)
+        {
+          digitalWrite(CAMERA_TRIGGER_PIN, HIGH); //Start camera exposure
+        }
         cameraDelta = cameraExposureTime;
       }
 
@@ -538,7 +578,6 @@ void updateStates()
     if(previousState == ODORANT_STATE)
     {
       digitalWrite(odorantOrder[odorantIndex], LOW);
-      //sendSerialTrigger('0');
       odorantIndex = (odorantIndex + 1);
     }
 
@@ -546,7 +585,6 @@ void updateStates()
     if(currentState == ODORANT_STATE)
     {
       digitalWrite(odorantOrder[odorantIndex], HIGH);
-      //sendSerialTrigger('1');
     }
 
     if(previousState == RESET_STATE)
@@ -597,6 +635,29 @@ void closeLaserShutters()
   laserEnabled = false;
 }
 
+//Uses an IR LED/receiver setup to align the chopper for a given laser mode
+void singleLaserChopperAlignment()
+{
+  digitalWrite(SINGLE_LASER_TRANSMITTER_PIN, HIGH);
+  
+  while(true)
+  {
+    if((laserMode == LASER_1_ONLY && digitalRead(SINGLE_LASER_RECEIVER_PIN) == HIGH) ||
+      (laserMode == LASER_2_ONLY && digitalRead(SINGLE_LASER_RECEIVER_PIN) == LOW))
+      {
+        break;
+      }
+
+    analogWriteFrequency(CHOPPER_INPUT_REFERENCE_PIN, volumesPerSecond/2);
+    analogWrite(CHOPPER_INPUT_REFERENCE_PIN, 127);
+    delay(CHOPPER_ALIGNMENT_DELAY); //Wait for chopper to start spinning
+    analogWrite(CHOPPER_INPUT_REFERENCE_PIN, 0); //Stop chopper
+    delay(CHOPPER_ALIGNMENT_DELAY); //Wait for chopper to stop spinning
+  }
+
+  digitalWrite(SINGLE_LASER_TRANSMITTER_PIN, LOW);
+}
+
 void initializeHardware()
 {
   analogWrite(RESONANT_SCANNER_PIN, resonantScannerPinValue);
@@ -608,15 +669,18 @@ void resetHardware()
   closeLaserShutters();
   analogWrite(RESONANT_SCANNER_PIN, 0);
   analogWrite(VOLUME_GALVO_PIN, volumeGalvoMinAmplitude);
+  digitalWrite(CAMERA_TRIGGER_PIN, LOW);
   galvosEnabled = false;
   cameraEnabled = false;
+  cameraOn = false;
 }
 
 void shutdownHardware()
 {
+  Serial.println("Shutting down hardware");
   closeLaserShutters();
   analogWrite(RESONANT_SCANNER_PIN, 0);
-  analogWrite(VOLUME_GALVO_PIN, 0);
+  analogWrite(VOLUME_GALVO_PIN, (1<<(analogResolution-1)));
   digitalWrite(CAMERA_TRIGGER_PIN, LOW);
   analogWrite(CHOPPER_INPUT_REFERENCE_PIN, 0);
   programState = SETUP;
