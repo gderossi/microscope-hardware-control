@@ -12,7 +12,7 @@ const int SERIAL_INDICATOR_PIN = 13; //LED Pin, 13 for Teensy
 const int LASER_SHUTTER_1_PIN =  27; //Digital output, 27 for Teensy
 const int LASER_SHUTTER_2_PIN = 28; //Digital output, 28 for Teensy
 const int SINGLE_LASER_TRANSMITTER_PIN = 23; //Digital output, 23 for Teensy
-const int SINGLE_LASER_RECEIVER_PIN = 22; //Digital input, 22 for Teensy
+const int SINGLE_LASER_RECEIVER_PIN = A8; //Analog input, 22/A8 for Teensy
 
 const int ODORANT_1_PIN = 0;
 const int ODORANT_2_PIN = 2;
@@ -32,6 +32,8 @@ const int LASER_SHUTTER_RESPONSE_TIME = 5000; //Microseconds
 const int BAUDRATE = 115200;   //Ignored by Teensy
 const int DEFAULT_TIME_UNIT = 1000000; //Microseconds per second
 const int CHOPPER_ALIGNMENT_DELAY = 5000; //Microseconds to wait for chopper start/stop
+const int SINGLE_LASER_RECEIVER_THRESHOLD = 100; //Threshold analog value for detecting IR
+const int IR_SAMPLES = 5; //Number of IR receiver samples to use for averaging
 
 //Currently preallocating arrays for odorant and state orders, make this number bigger/smaller depending on what the use cases are
 const int MAX_STATE_COUNT = 32;
@@ -389,7 +391,10 @@ void calibrationLoop()
     updateHardware();
     checkSerial(); 
   }
-  Serial.println("Calibration complete. Starting experiment...");
+  if(programState == EXPERIMENT)
+  {
+    Serial.println("Calibration complete. Starting experiment..."); 
+  }
 }
 
 //Checks for and updates a subset of parameters as part of the calibration loop
@@ -638,12 +643,21 @@ void closeLaserShutters()
 //Uses an IR LED/receiver setup to align the chopper for a given laser mode
 void singleLaserChopperAlignment()
 {
+  int receiverValue;
+  
   digitalWrite(SINGLE_LASER_TRANSMITTER_PIN, HIGH);
   
   while(true)
   {
-    if((laserMode == LASER_1_ONLY && digitalRead(SINGLE_LASER_RECEIVER_PIN) == HIGH) ||
-      (laserMode == LASER_2_ONLY && digitalRead(SINGLE_LASER_RECEIVER_PIN) == LOW))
+    receiverValue = 0;
+    for(int i = 0; i<IR_SAMPLES; i++)
+    {
+      receiverValue += analogRead(SINGLE_LASER_RECEIVER_PIN);
+    }
+    receiverValue /= IR_SAMPLES;
+     
+    if((laserMode == LASER_1_ONLY && receiverValue >= SINGLE_LASER_RECEIVER_THRESHOLD) ||
+      (laserMode == LASER_2_ONLY && receiverValue < SINGLE_LASER_RECEIVER_THRESHOLD))
       {
         break;
       }
