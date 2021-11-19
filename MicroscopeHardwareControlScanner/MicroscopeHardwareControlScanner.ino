@@ -49,6 +49,7 @@ const int MAX_ODORANT_COUNT = 32;
 #define STATE_ORDER '6'
 #define LASER_MODE '7'
 #define RESONANT_SCANNER_AMPLITUDE '8'
+#define CAMERA_EXPOSURE_TIME '9'
 #define LOCATE_EXPERIMENT_DEVICE '?'
 #define ABORT_EXPERIMENT '!'
 
@@ -82,7 +83,7 @@ int volumeGalvoMaxAmplitude;
 volatile bool newVolume = true;
 
 //Camera parameters
-int cameraExposureTime;
+int cameraExposureTime = 0;
 bool cameraOn = false;
 
 //Control variables
@@ -179,6 +180,12 @@ void setupLoop()
   stateIndex = 0;
   currentState = NULL_STATE;
   previousState = NULL_STATE;
+
+  //Clear incoming Serial buffer
+  while(Serial.available())
+  {
+    Serial.read();
+  }
   
   while(programState == SETUP)
   {
@@ -303,6 +310,10 @@ void setupLoop()
           Serial.print("Set resonant scanner amplitude to ");
           Serial.println(resonantScannerAmplitude);
           break;
+        case CAMERA_EXPOSURE_TIME:
+          cameraExposureTime = Serial.parseInt();
+          Serial.print("Set camera exposure time to ");
+          Serial.println(cameraExposureTime);
         case LOCATE_EXPERIMENT_DEVICE:
           Serial.println("EXPERIMENT_DEVICE");
           break;
@@ -332,8 +343,15 @@ void initializeParameters(bool debug)
   resonantScannerAmplitude = min(max(0, resonantScannerAmplitude), 1);
   resonantScannerPinValue = int(resonantScannerAmplitude * (1<<analogResolution));
 
-  cameraExposureTime = volumeGalvoStepTime - VOLUME_GALVO_RESPONSE_TIME;
-
+  if(cameraExposureTime < 0)
+  {
+    cameraExposureTime = volumeGalvoStepTime - VOLUME_GALVO_RESPONSE_TIME;
+  }
+  else
+  {
+    cameraExposureTime = min(cameraExposureTime, volumeGalvoStepTime - VOLUME_GALVO_RESPONSE_TIME);
+  }
+  
   volumeGalvoDelta = volumeGalvoStepTime;
 
   currentState = stateOrder[stateIndex] & STATE_MASK;
@@ -384,6 +402,12 @@ void calibrationLoop()
   currentTime = micros();
   volumeGalvoStart = currentTime;
   cameraStart = currentTime;
+
+  //Clear incoming Serial buffer
+  while(Serial.available())
+  {
+    Serial.read();
+  }
   
   while(programState == CALIBRATION)
   {
@@ -434,6 +458,9 @@ void checkSerial()
         resonantScannerAmplitude = Serial.parseFloat();
         initializeParameters(false);
         break;
+      case CAMERA_EXPOSURE_TIME:
+        cameraExposureTime = Serial.parseInt();
+        initializeParameters(false);
       case ABORT_EXPERIMENT:
         programState = RESET;
         break;
