@@ -11,8 +11,10 @@ const int CHOPPER_OUTPUT_REFERENCE_PIN = 30; //Digital input, 30 for Teensy
 const int SERIAL_INDICATOR_PIN = 13; //LED Pin, 13 for Teensy
 const int LASER_SHUTTER_1_PIN =  27; //Digital output, 27 for Teensy
 const int LASER_SHUTTER_2_PIN = 28; //Digital output, 28 for Teensy
-const int SINGLE_LASER_TRANSMITTER_PIN = 23; //Digital output, 23 for Teensy
-const int SINGLE_LASER_RECEIVER_PIN = A8; //Analog input, 22/A8 for Teensy
+const int SINGLE_LASER_TRANSMITTER_PIN_1 = 23; //Digital output, 23 for Teensy
+const int SINGLE_LASER_RECEIVER_PIN_1 = A8; //Analog input, 22/A8 for Teensy
+const int SINGLE_LASER_TRANSMITTER_PIN_2 = 21; //Digital output, 21 for Teensy
+const int SINGLE_LASER_RECEIVER_PIN_2 = A6; //Analog input, 20/A6 for Teensy
 
 const int ODORANT_1_PIN = 0;
 const int ODORANT_2_PIN = 2;
@@ -34,44 +36,52 @@ const int DEFAULT_TIME_UNIT = 1000000; //Microseconds per second
 const int CHOPPER_ALIGNMENT_DELAY = 5000; //Microseconds to wait for chopper start/stop
 const int SINGLE_LASER_RECEIVER_THRESHOLD = 100; //Threshold analog value for detecting IR
 const int IR_SAMPLES = 5; //Number of IR receiver samples to use for averaging
+const unsigned int ANALOG_RESOLUTION = 9; //Number of bits to use for analog writes
 
 //Currently preallocating arrays for odorant and state orders, make this number bigger/smaller depending on what the use cases are
 const int MAX_STATE_COUNT = 32;
 const int MAX_ODORANT_COUNT = 32;
 
 //User-defined settings, updated via serial connection with microscope computer
-#define START '0'
-#define SLICES_PER_VOLUME '1'
-#define VOLUMES_PER_SECOND '2'
-#define VOLUME_SCALE_MIN '3'
-#define VOLUME_SCALE_MAX '4'
-#define ODORANT_ORDER '5' 
-#define STATE_ORDER '6'
-#define LASER_MODE '7'
-#define RESONANT_SCANNER_AMPLITUDE '8'
-#define CAMERA_EXPOSURE_TIME '9'
-#define LOCATE_EXPERIMENT_DEVICE '?'
-#define ABORT_EXPERIMENT '!'
+const char START = '0';
+const char SLICES_PER_VOLUME = '1';
+const char VOLUMES_PER_SECOND = '2';
+const char VOLUME_SCALE_MIN = '3';
+const char VOLUME_SCALE_MAX = '4';
+const char ODORANT_ORDER = '5';
+const char STATE_ORDER = '6';
+const char LASER_MODE = '7';
+const char RESONANT_SCANNER_AMPLITUDE = '8';
+const char CAMERA_EXPOSURE_TIME = '9';
+const char LOCATE_EXPERIMENT_DEVICE = '?';
+const char ABORT_EXPERIMENT = '!';
 
-#define BOTH_LASERS 0
-#define LASER_1_ONLY 1
-#define LASER_2_ONLY 2
+const int BOTH_LASERS = 0;
+const int LASER_1_ONLY = 1;
+const int LASER_2_ONLY = 2;
 
-int slicesPerVolume = -1;
-int volumesPerSecond = -1;
-float volumeScaleMin = -1;
-float volumeScaleMax = -1;
-int laserMode = -1;
-float resonantScannerAmplitude = -1;
-unsigned int analogResolution = 9;
+const int DEFAULT_SLICES_PER_VOLUME = 20;
+const int DEFAULT_VOLUMES_PER_SECOND = 20;
+const int DEFAULT_VOLUME_SCALE_MIN = 0;
+const int DEFAULT_VOLUME_SCALE_MAX = 1;
+const int DEFAULT_RESONANT_SCANNER_AMPLITUDE = 1;
+const int DEFAULT_CAMERA_EXPOSURE_TIME = -1;
+int slicesPerVolume;
+int volumesPerSecond;
+float volumeScaleMin;
+float volumeScaleMax;
+int laserMode;
+float resonantScannerAmplitude;
+int cameraExposureTime;
+
 int odorantOrder[MAX_ODORANT_COUNT];
 
-#define NULL_STATE 0x00000000
-#define DEFAULT_STATE 0x00010000
-#define ODORANT_STATE 0x00020000
-#define RESET_STATE 0x00030000
-#define STATE_MASK 0xFFFF0000
-#define DURATION_MASK 0x0000FFFF
+const unsigned int NULL_STATE = 0x00000000;
+const unsigned int DEFAULT_STATE = 0x00010000;
+const unsigned int ODORANT_STATE = 0x00020000;
+const unsigned int RESET_STATE = 0x00030000;
+const unsigned int STATE_MASK = 0xFFFF0000;
+const unsigned int DURATION_MASK = 0x0000FFFF;
 unsigned int stateOrder[MAX_STATE_COUNT]; //Store state as high 16 bits and duration as low 16 bits
 
 //Volume-generator galvo parameters
@@ -80,21 +90,20 @@ int volumeGalvoStepTime;
 int volumeGalvoStepAmplitude;
 int volumeGalvoMinAmplitude;
 int volumeGalvoMaxAmplitude;
-volatile bool newVolume = true;
+volatile bool newVolume;
 
 //Camera parameters
-int cameraExposureTime = 0;
-bool cameraOn = false;
+bool cameraOn;
 
 //Control variables
-bool resetState = false;
-bool galvosEnabled = true;
-bool cameraEnabled = true;
-bool laserEnabled = false;
+bool resetState;
+bool galvosEnabled;
+bool cameraEnabled;
+bool laserEnabled;
 
 //Delta timing variables
 unsigned long volumeGalvoDelta;
-unsigned long cameraDelta = -1;
+unsigned long cameraDelta;
 unsigned long stateDelta;
 
 unsigned long volumeGalvoStart;
@@ -105,23 +114,23 @@ unsigned long laserShutterStart;
 unsigned long currentTime;
 
 //Program control flow
-#define SETUP 0
-#define CALIBRATION 1
-#define EXPERIMENT 2
-#define RESET 3
-int programState = SETUP;
+const int SETUP = 0;
+const int CALIBRATION = 1;
+const int EXPERIMENT = 2;
+const int RESET = 3;
+int programState;
 
 //Variables for writing to output pins
-int volumeGalvoDirection = 1;
-int volumeGalvoPinValue = 0;
+int volumeGalvoDirection;
+int volumeGalvoPinValue;
 
-int resonantScannerPinValue = 0;
+int resonantScannerPinValue;
 
 //Experiment control
-unsigned int odorantIndex = 0;
-unsigned int stateIndex = 0;
-unsigned int currentState = NULL_STATE;
-unsigned int previousState = NULL_STATE;
+unsigned int odorantIndex;
+unsigned int stateIndex;
+unsigned int currentState;
+unsigned int previousState;
 
 void setup() {
   Serial.begin(BAUDRATE);
@@ -134,8 +143,10 @@ void setup() {
   pinMode(SERIAL_INDICATOR_PIN, OUTPUT);
   pinMode(LASER_SHUTTER_1_PIN, OUTPUT);
   pinMode(LASER_SHUTTER_2_PIN, OUTPUT);
-  pinMode(SINGLE_LASER_TRANSMITTER_PIN, OUTPUT);
-  pinMode(SINGLE_LASER_RECEIVER_PIN, INPUT);
+  pinMode(SINGLE_LASER_TRANSMITTER_PIN_1, OUTPUT);
+  pinMode(SINGLE_LASER_RECEIVER_PIN_1, INPUT);
+  pinMode(SINGLE_LASER_TRANSMITTER_PIN_2, OUTPUT);
+  pinMode(SINGLE_LASER_RECEIVER_PIN_2, INPUT);
   pinMode(ODORANT_1_PIN, OUTPUT);
   pinMode(ODORANT_2_PIN, OUTPUT);
   pinMode(ODORANT_3_PIN, OUTPUT);
@@ -145,9 +156,11 @@ void setup() {
   pinMode(ODORANT_7_PIN, OUTPUT);
   pinMode(ODORANT_8_PIN, OUTPUT);
 
-  analogWriteResolution(analogResolution);
+  analogWriteResolution(ANALOG_RESOLUTION);
 
   attachInterrupt(digitalPinToInterrupt(CHOPPER_OUTPUT_REFERENCE_PIN), startVolume, CHANGE);
+
+  programState = SETUP;
 }
 
 void loop() {
@@ -176,10 +189,7 @@ void setupLoop()
   unsigned int stateCount;
   int o;
 
-  odorantIndex = 0;
-  stateIndex = 0;
-  currentState = NULL_STATE;
-  previousState = NULL_STATE;
+  initializeVariables();
 
   //Clear incoming Serial buffer
   while(Serial.available())
@@ -336,12 +346,12 @@ void initializeParameters(bool debug)
 {
   volumeGalvoStepCount = slicesPerVolume;
   volumeGalvoStepTime = DEFAULT_TIME_UNIT / (volumesPerSecond * slicesPerVolume);            
-  volumeGalvoStepAmplitude = ((1<<analogResolution) * (volumeScaleMax-volumeScaleMin)) / volumeGalvoStepCount;
-  volumeGalvoMinAmplitude = (1<<analogResolution) * volumeScaleMin;
+  volumeGalvoStepAmplitude = ((1<<ANALOG_RESOLUTION) * (volumeScaleMax-volumeScaleMin)) / volumeGalvoStepCount;
+  volumeGalvoMinAmplitude = (1<<ANALOG_RESOLUTION) * volumeScaleMin;
   volumeGalvoMaxAmplitude = volumeGalvoMinAmplitude + volumeGalvoStepAmplitude * (volumeGalvoStepCount-1);
 
   resonantScannerAmplitude = min(max(0, resonantScannerAmplitude), 1);
-  resonantScannerPinValue = int(resonantScannerAmplitude * (1<<analogResolution));
+  resonantScannerPinValue = int(resonantScannerAmplitude * (1<<ANALOG_RESOLUTION));
 
   if(cameraExposureTime < 0)
   {
@@ -480,8 +490,16 @@ void experimentLoop()
   {
     Serial.read();
   }
+
+  if(currentState != RESET_STATE)
+  {
+    initializeHardware();
+  }
+  else
+  {
+    resetState = true;
+  }
   
-  initializeHardware();
   currentTime = micros();
   volumeGalvoStart = currentTime;
   cameraStart = currentTime;
@@ -670,21 +688,25 @@ void closeLaserShutters()
 //Uses an IR LED/receiver setup to align the chopper for a given laser mode
 void singleLaserChopperAlignment()
 {
-  int receiverValue;
+  int receiverValue1, receiverValue2;
   
-  digitalWrite(SINGLE_LASER_TRANSMITTER_PIN, HIGH);
+  digitalWrite(SINGLE_LASER_TRANSMITTER_PIN_1, HIGH);
+  digitalWrite(SINGLE_LASER_TRANSMITTER_PIN_2, HIGH);
   
   while(true)
   {
-    receiverValue = 0;
+    receiverValue1 = 0;
+    receiverValue2 = 0;
     for(int i = 0; i<IR_SAMPLES; i++)
     {
-      receiverValue += analogRead(SINGLE_LASER_RECEIVER_PIN);
+      receiverValue1 += analogRead(SINGLE_LASER_RECEIVER_PIN_1);
+      receiverValue2 += analogRead(SINGLE_LASER_RECEIVER_PIN_2);
     }
-    receiverValue /= IR_SAMPLES;
+    receiverValue1 /= IR_SAMPLES;
+    receiverValue2 /= IR_SAMPLES;
      
-    if((laserMode == LASER_1_ONLY && receiverValue >= SINGLE_LASER_RECEIVER_THRESHOLD) ||
-      (laserMode == LASER_2_ONLY && receiverValue < SINGLE_LASER_RECEIVER_THRESHOLD))
+    if((laserMode == LASER_1_ONLY && receiverValue1 >= SINGLE_LASER_RECEIVER_THRESHOLD && receiverValue2 >= SINGLE_LASER_RECEIVER_THRESHOLD) ||
+      (laserMode == LASER_2_ONLY && receiverValue1 < SINGLE_LASER_RECEIVER_THRESHOLD && receiverValue2 < SINGLE_LASER_RECEIVER_THRESHOLD))
       {
         break;
       }
@@ -696,7 +718,8 @@ void singleLaserChopperAlignment()
     delay(CHOPPER_ALIGNMENT_DELAY); //Wait for chopper to stop spinning
   }
 
-  digitalWrite(SINGLE_LASER_TRANSMITTER_PIN, LOW);
+  digitalWrite(SINGLE_LASER_TRANSMITTER_PIN_1, LOW);
+  digitalWrite(SINGLE_LASER_TRANSMITTER_PIN_2, LOW);
 }
 
 void initializeHardware()
@@ -721,8 +744,44 @@ void shutdownHardware()
   Serial.println("Shutting down hardware");
   closeLaserShutters();
   analogWrite(RESONANT_SCANNER_PIN, 0);
-  analogWrite(VOLUME_GALVO_PIN, (1<<(analogResolution-1)));
+  analogWrite(VOLUME_GALVO_PIN, (1<<(ANALOG_RESOLUTION-1)));
   digitalWrite(CAMERA_TRIGGER_PIN, LOW);
   analogWrite(CHOPPER_INPUT_REFERENCE_PIN, 0);
   programState = SETUP;
+}
+
+void initializeVariables()
+{
+  slicesPerVolume = DEFAULT_SLICES_PER_VOLUME;
+  volumesPerSecond = DEFAULT_VOLUMES_PER_SECOND;
+  volumeScaleMin = DEFAULT_VOLUME_SCALE_MIN;
+  volumeScaleMax = DEFAULT_VOLUME_SCALE_MAX;
+  laserMode = BOTH_LASERS;
+  resonantScannerAmplitude = DEFAULT_RESONANT_SCANNER_AMPLITUDE;
+  cameraExposureTime = DEFAULT_CAMERA_EXPOSURE_TIME;
+
+  for(int i=0; i < MAX_ODORANT_COUNT; i++)
+  {
+    odorantOrder[i] = NULL_ODORANT;
+  }
+  for(int i=0; i < MAX_STATE_COUNT; i++)
+  {
+    stateOrder[i] = NULL_STATE;
+  }
+
+  newVolume = true;
+  cameraOn = false;
+  resetState = false;
+  galvosEnabled = true;
+  cameraEnabled = true;
+  laserEnabled = false;
+  
+  volumeGalvoDirection = 1;
+  volumeGalvoPinValue = 0;
+  resonantScannerPinValue = 0;
+  
+  odorantIndex = 0;
+  stateIndex = 0;
+  currentState = NULL_STATE;
+  previousState = NULL_STATE;
 }
