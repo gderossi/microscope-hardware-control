@@ -104,11 +104,12 @@ bool laserEnabled;
 //Delta timing variables
 unsigned long volumeGalvoDelta;
 unsigned long cameraDelta;
-unsigned long stateDelta;
+//unsigned long stateDelta;
+unsigned long stateRemainingImageCount;
 
 unsigned long volumeGalvoStart;
 unsigned long cameraStart;
-unsigned long stateStart;
+//unsigned long stateStart;
 unsigned long laserShutterStart;
 
 unsigned long currentTime;
@@ -131,6 +132,11 @@ unsigned int odorantIndex;
 unsigned int stateIndex;
 unsigned int currentState;
 unsigned int previousState;
+
+//Metadata control
+unsigned int odorantCount;
+unsigned int stateCount;
+unsigned int currentOdorState = 0;
 
 void setup() {
   Serial.begin(BAUDRATE);
@@ -231,7 +237,7 @@ void setupLoop()
           Serial.println(volumeScaleMax);
           break;
         case ODORANT_ORDER:
-          odorants = Serial.readStringUntil('\n');
+          odorants = Serial.readStringUntil('\r');
           Serial.print("Odorant order: ");
           
           //Fill odorantOrder with NULL_ODORANT values
@@ -365,7 +371,7 @@ void initializeParameters(bool debug)
   volumeGalvoDelta = volumeGalvoStepTime;
 
   currentState = stateOrder[stateIndex] & STATE_MASK;
-  stateDelta = (stateOrder[stateIndex] & DURATION_MASK) * DEFAULT_TIME_UNIT;
+  stateRemainingImageCount = (stateOrder[stateIndex] & DURATION_MASK) * volumesPerSecond * slicesPerVolume;
 
   if(laserMode == BOTH_LASERS)
   {
@@ -504,7 +510,7 @@ void experimentLoop()
   volumeGalvoStart = currentTime;
   cameraStart = currentTime;
   cameraDelta = -1;
-  stateStart = currentTime;
+  //stateStart = currentTime;
   
   while(programState == EXPERIMENT)
   {
@@ -532,6 +538,7 @@ void updateHardware()
         {
           digitalWrite(CAMERA_TRIGGER_PIN, LOW);  //Stop camera exposure
         }
+        stateRemainingImageCount -= 1;
         cameraDelta = -1;
       }
       else
@@ -576,13 +583,13 @@ void updateHardware()
         volumeGalvoDirection *= -1;
         
         //Disable hardware after finishing volume
-        if(resetState && galvosEnabled)
+        if(resetState && galvosEnabled && digitalRead(CHOPPER_OUTPUT_REFERENCE_PIN) == HIGH)
         {
           resetHardware();
         }
 
         //Reenable hardware after reset state when starting new volume
-        else if(!resetState && !galvosEnabled)
+        else if(!resetState && !galvosEnabled && digitalRead(CHOPPER_OUTPUT_REFERENCE_PIN) == LOW)
         {
           galvosEnabled = true;
           openLaserShutters();
@@ -605,7 +612,7 @@ void updateHardware()
 void updateStates()
 {
   //Delta timing for states
-  if(currentTime - stateStart >= stateDelta)
+  if(stateRemainingImageCount == 0)
   {
     //Update stateIndex and move to start of array if no valid states remaining
     stateIndex = (stateIndex + 1) % MAX_STATE_COUNT;
@@ -622,7 +629,7 @@ void updateStates()
     //Update state and duration
     previousState = currentState;
     currentState = stateOrder[stateIndex] & STATE_MASK;
-    stateDelta = (stateOrder[stateIndex] & DURATION_MASK) * DEFAULT_TIME_UNIT;
+    stateRemainingImageCount = (stateOrder[stateIndex] & DURATION_MASK) * volumesPerSecond * slicesPerVolume;
 
     //Turn off odorant if odorant state just concluded, and update odorantIndex
     if(previousState == ODORANT_STATE)
@@ -647,7 +654,7 @@ void updateStates()
       resetState = true;
     }
 
-    stateStart = currentTime;
+    //stateStart = currentTime;
   }
 }
 
