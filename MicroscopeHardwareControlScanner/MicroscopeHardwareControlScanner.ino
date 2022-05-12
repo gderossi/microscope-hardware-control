@@ -65,7 +65,7 @@ const int DEFAULT_VOLUMES_PER_SECOND = 20;
 const int DEFAULT_VOLUME_SCALE_MIN = 0;
 const int DEFAULT_VOLUME_SCALE_MAX = 1;
 const int DEFAULT_RESONANT_SCANNER_AMPLITUDE = 1;
-const int DEFAULT_CAMERA_EXPOSURE_TIME = -1;
+const int DEFAULT_CAMERA_EXPOSURE_TIME = 200;
 int slicesPerVolume;
 int volumesPerSecond;
 float volumeScaleMin;
@@ -372,7 +372,7 @@ void initializeParameters(bool debug)
 
   currentState = stateOrder[stateIndex] & STATE_MASK;
   stateRemainingImageCount = (stateOrder[stateIndex] & DURATION_MASK) * volumesPerSecond * slicesPerVolume;
-
+  //Serial.println(stateRemainingImageCount);
   if(laserMode == BOTH_LASERS)
   {
     analogWriteFrequency(CHOPPER_INPUT_REFERENCE_PIN, volumesPerSecond/2);
@@ -380,7 +380,7 @@ void initializeParameters(bool debug)
   }
   else
   {
-    singleLaserChopperAlignment();
+    //singleLaserChopperAlignment();
   }
   
   if(debug)
@@ -418,6 +418,7 @@ void calibrationLoop()
   currentTime = micros();
   volumeGalvoStart = currentTime;
   cameraStart = currentTime;
+  cameraDelta = -1;
 
   //Clear incoming Serial buffer
   while(Serial.available())
@@ -538,7 +539,11 @@ void updateHardware()
         {
           digitalWrite(CAMERA_TRIGGER_PIN, LOW);  //Stop camera exposure
         }
-        stateRemainingImageCount -= 1;
+        if(programState == EXPERIMENT)
+        {
+          stateRemainingImageCount -= 1;
+        }
+        //Serial.println(stateRemainingImageCount);
         cameraDelta = -1;
       }
       else
